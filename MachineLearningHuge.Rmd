@@ -1,0 +1,168 @@
+---
+title: "Machine Learning Project"
+author: "DBW"
+output: html_document
+---
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+##Data 
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+
+
+##Data Processing
+
+First we loaded the data and then we removed all the entries that were not numeric and all the entries in which the whole column was composed of NAs.  We then checked that the testing and training data had the same number of columns (variables).
+
+```{r}
+library(caret)
+library(kernlab)
+library(mlbench)
+library(gridExtra)
+#setingwd
+setwd("~/Documents/repos/MachineLearning")
+#loading the data
+trainingRaw<-read.csv("~/Documents/repos/MachineLearning/pml-training.csv", na.strings = c("#DIV/0!","",NA), sep=",")
+testingRaw<-read.csv("~/Documents/repos/MachineLearning/pml-testing.csv", na.strings = c("#DIV/0!","",NA), sep=",")
+unique(trainingRaw$classe)
+
+#cleaning the data (removing the X variable)
+training<-trainingRaw[,-1]
+testing<-testingRaw[,-1]
+
+#staying only with numeric variables
+training<-training[,sapply(training, is.numeric)]
+testing<-testing[,sapply(testing, is.numeric)]
+
+#removing NA
+#all the columns which the sum is 0, has no NA
+removeNA=apply(apply(training, FUN=is.na, 2), FUN=sum, 2)
+training<-training[,removeNA==0]
+training$classe<-trainingRaw$classe
+dim(training)
+
+removeNA=apply(apply(testing, FUN=is.na, 2), FUN=sum, 2)
+testing<-testing[,removeNA==0]
+dim(testing)
+```
+
+##Slicing the Data
+
+We then cut our training data in two slices with 0.6 of observations in the Training Set and 0.4 in the Testing Set.
+
+```{r}
+#creating training and testing data
+set.seed(123)
+inTrain = createDataPartition(training$classe, p= 0.6, list=FALSE)
+cross_training=training[inTrain,]
+cross_testing=training[-inTrain,]
+```
+
+##Selecting the model
+
+Since we will use a five categories classification the best option to use will be a tree model. Tree models suffer less from data variation, outliers and distribution and are very easy to interpret.
+We will know try to choose which is the best Tree Model and do a benchmark with a non-tree model (SVM). We will choose the best accuracy model to our predictions.  
+
+To achieve that we will run each model with a **5 fold cross-validation, 3 times,** to get the best accuracy estimate. The models we chose were:  
+
+**Bagging Tree**  
+**Boosting Tree**  
+**Random Forest**  
+  
+**SVM**
+
+```{r, cache=TRUE}
+control <- trainControl(method="repeatedcv", repeats=3, number=5)
+#Bagging
+set.seed(123)
+Bagging<- train(classe~., data=cross_training, method="treebag",trControl=control, verbose=FALSE)
+Bagging
+```
+
+```{r, cache=TRUE}
+
+#boosted Trees
+set.seed(123)
+Boosted <- train(classe~., data=cross_training, method="gbm", trControl=control, verbose=FALSE)
+Boosted
+```
+
+```{r, cache=TRUE}
+#Random Forest
+set.seed(123)
+RandFor<- train(classe~., data=cross_training, method="rf", trControl=control, verbose=FALSE)
+RandFor
+```
+
+```{r, cache=TRUE}
+#Just to be sure, lets check non-tree method accuracy
+set.seed(123)
+SVM<-train(classe~., data=cross_training, method="svmRadial", trControl=control, verbose=FALSE)
+SVM
+```
+
+####Table and Figure comparing models
+```{r}
+#comparing methods
+results<-resamples(list(Bagging = Bagging, Boosted = Boosted, RandFor = RandFor, SVM = SVM))
+summary(results)
+g1<-bwplot(results)
+g2<-dotplot(results)
+grid.arrange(g1,g2,ncol=1)
+```
+  
+In our **training sample** with a 5 fold cross-validation we got an **accuracy of 99.71%** for the Random Forest, and we opted for this model.
+
+##Testing the Model: Random Forest
+
+Know, we should test it in our sliced testing dataset.  
+
+```{r}
+#testing the best model
+prediction<-predict(RandFor, cross_testing)
+CMatrix<-confusionMatrix(prediction, cross_testing$classe)
+CMatrix
+```
+
+
+We could see that we got a **99.89% out-of-sample accuracy** with the Random Forest Model, meaning a **0.11% out-of-sample error.**
+
+```{r, results="asis"}
+knitr::kable(CMatrix$table)
+```
+
+##Appendix: Figures
+
+```{r}
+C.data.frame<-as.data.frame(CMatrix$table)
+g3<-ggplot(C.data.frame)+geom_tile(aes(x=Reference,y=Prediction,fill=Freq))
+g3
+```
+
+##submit  testing data
+```{r}
+finalresult<-as.character(predict(RandFor,testing))
+finalresult
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(finalresult)
+```
+
+
